@@ -182,7 +182,11 @@ vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagn
 --
 -- NOTE: This won't work in all terminal emulators/tmux/etc. Try your own mapping
 -- or just use <C-\><C-n> to exit terminal mode
-vim.keymap.set('t', '<Esc><Esc>', '<C-\\><C-n>', { desc = 'Exit terminal mode' })
+vim.keymap.set('t', '<C-x>', '<C-\\><C-n>', { desc = 'Exit terminal Insert Mode' })
+vim.keymap.set('t', '<C-k>', function()
+  vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-\\><C-n>', true, false, true), 'n', true)
+  vim.cmd 'wincmd k'
+end, { desc = 'Exit Terminal Insert Mode and move up' })
 
 -- TIP: Disable arrow keys in normal mode
 -- vim.keymap.set('n', '<left>', '<cmd>echo "Use h to move!!"<CR>')
@@ -205,6 +209,10 @@ vim.keymap.set('n', '<C-k>', '<C-w><C-k>', { desc = 'Move focus to the upper win
 -- vim.keymap.set("n", "<C-S-j>", "<C-w>J", { desc = "Move window to the lower" })
 -- vim.keymap.set("n", "<C-S-k>", "<C-w>K", { desc = "Move window to the upper" })
 
+-- Custom Zig Keymaps
+vim.keymap.set('n', '<leader>zr', ':terminal zig build run<CR>', { desc = '[Z]ig Build [R]un' })
+vim.keymap.set('n', '<leader>zt', ':terminal zig build test<CR>', { desc = '[Z]ig Build [T]est' })
+vim.keymap.set('n', '<leader>zb', ':terminal zig build<CR>', { desc = '[Z]ig [B]uild' })
 -- [[ Basic Autocommands ]]
 --  See `:help lua-guide-autocommands`
 
@@ -248,6 +256,8 @@ rtp:prepend(lazypath)
 require('lazy').setup({
   -- NOTE: Plugins can be added with a link (or for a github repo: 'owner/repo' link).
   'NMAC427/guess-indent.nvim', -- Detect tabstop and shiftwidth automatically
+  'tpope/vim-sleuth', -- Detect tabstop and shiftwidth automatically
+  'ziglang/zig.vim',
 
   -- NOTE: Plugins can also be added by using a table,
   -- with the first argument being the link and the following
@@ -493,6 +503,13 @@ require('lazy').setup({
       'saghen/blink.cmp',
     },
     config = function()
+      vim.lsp.util.open_floating_preview = (function(orig)
+        return function(contents, syntax, opts, ...)
+          opts = opts or {}
+          opts.border = opts.border or 'rounded'
+          return orig(contents, syntax, opts, ...)
+        end
+      end)(vim.lsp.util.open_floating_preview)
       -- Brief aside: **What is LSP?**
       --
       -- LSP is an initialism you've probably heard, but might not understand what it is.
@@ -671,6 +688,9 @@ require('lazy').setup({
       --  - settings (table): Override the default settings passed when initializing the server.
       --        For example, to see the options for `lua_ls`, you could go to: https://luals.github.io/wiki/settings/
       local servers = {
+        zls = {
+          cmd = { vim.fn.expand '~/zls/zig-out/bin/zls' },
+        },
         -- clangd = {},
         -- gopls = {},
         -- pyright = {},
@@ -724,6 +744,9 @@ require('lazy').setup({
         automatic_installation = false,
         handlers = {
           function(server_name)
+            if server_name == 'rust_analyzer' then
+              return
+            end
             local server = servers[server_name] or {}
             -- This handles overriding only values explicitly passed
             -- by the server configuration above. Useful when disabling
@@ -731,6 +754,83 @@ require('lazy').setup({
             server.capabilities = vim.tbl_deep_extend('force', {}, capabilities, server.capabilities or {})
             require('lspconfig')[server_name].setup(server)
           end,
+        },
+      }
+    end,
+  },
+  {
+    'mrcjkb/rustaceanvim',
+    version = '^6',
+    lazy = false,
+    init = function()
+      vim.g.rustaceanvim = {
+        tools = {
+          enable_clippy = true,
+        },
+        server = {
+          on_attach = function(_, bufnr)
+            local buf_map = function(mode, lhs, rhs, desc)
+              vim.keymap.set(mode, lhs, rhs, { buffer = bufnr, desc = desc })
+            end
+
+            -- Keymap to run Clippy manually in a terminal split
+            buf_map('n', '<leader>rc', function()
+              vim.cmd 'botright split | terminal cargo clippy --all-targets --all-features -- -Wdead_code -Wclippy::all -Wclippy::pedantic'
+            end, 'Rust: Run Clippy in terminal')
+
+            -- Example of a Rust-specific keymap (macro expansion)
+            buf_map('n', '<leader>rm', function()
+              vim.cmd.RustExpandMacro()
+            end, 'Rust: Expand Macro')
+
+            -- Configure diagnostic display
+            vim.diagnostic.config {
+              virtual_text = false,
+              signs = true,
+              underline = true,
+              update_in_insert = false,
+              severity_sort = true,
+              float = {
+                border = 'rounded',
+                source = 'always',
+                header = '',
+                prefix = '',
+              },
+            }
+
+            -- Auto open diagnostic float on CursorHold
+            vim.o.updatetime = 300
+            vim.api.nvim_create_autocmd('CursorHold', {
+              buffer = bufnr,
+              callback = function()
+                vim.diagnostic.open_float(nil, { focusable = false })
+              end,
+            })
+
+            -- Optional: Set highlight style for underline to make it stand out more
+            vim.cmd [[
+              highlight! link DiagnosticVirtualTextHint DiagnosticUnderlineHint
+              highlight! link DiagnosticVirtualTextInfo DiagnosticUnderlineInfo
+              highlight! link DiagnosticVirtualTextWarn DiagnosticUnderlineWarn
+              highlight! link DiagnosticVirtualTextError DiagnosticUnderlineError
+
+              highlight! DiagnosticUnderlineHint gui=underline,bold guisp=LightBlue
+              highlight! DiagnosticUnderlineInfo gui=underline,bold guisp=Cyan
+              highlight! DiagnosticUnderlineWarn gui=underline,bold guibg=#3a1f1f guisp=Orange
+              highlight! DiagnosticUnderlineError gui=underline,bold guibg=#441111 guisp=Red
+            ]]
+          end,
+
+          settings = {
+            ['rust-analyzer'] = {
+              diagnostics = {
+                enable = true,
+                experimental = {
+                  enable = true,
+                },
+              },
+            },
+          },
         },
       }
     end,
@@ -756,7 +856,7 @@ require('lazy').setup({
         -- Disable "format_on_save lsp_fallback" for languages that don't
         -- have a well standardized coding style. You can add additional
         -- languages here or re-enable it for the disabled ones.
-        local disable_filetypes = { c = true, cpp = true }
+        local disable_filetypes = { c = true, cpp = true, zig = false }
         if disable_filetypes[vim.bo[bufnr].filetype] then
           return nil
         else
@@ -768,6 +868,8 @@ require('lazy').setup({
       end,
       formatters_by_ft = {
         lua = { 'stylua' },
+        zig = { 'zls' },
+        -- rust = { 'rustfmt' },
         -- Conform can also run multiple formatters sequentially
         -- python = { "isort", "black" },
         --
@@ -897,7 +999,24 @@ require('lazy').setup({
       vim.cmd.colorscheme 'tokyonight-night'
     end,
   },
+  {
+    'sainnhe/gruvbox-material',
+    lazy = false,
+    priority = 999,
+    config = function()
+      -- Optionally configure and load the colorscheme
+      -- directly inside the plugin declaration.
+      vim.g.gruvbox_material_enable_italic = true
+      vim.g.gruvbox_material_background = 'hard'
+      vim.g.gruvbox_material_enable_bold = true
+      vim.cmd.colorscheme 'gruvbox-material'
 
+      vim.api.nvim_set_hl(0, 'TelescopeBorder', { fg = '#665c54' })
+      vim.api.nvim_set_hl(0, 'TelescopePromptBorder', { fg = '#665c54' })
+      vim.api.nvim_set_hl(0, 'TelescopeResultsBorder', { fg = '#665c54' })
+      vim.api.nvim_set_hl(0, 'TelescopePreviewBorder', { fg = '#665c54' })
+    end,
+  },
   -- Highlight todo, notes, etc in comments
   { 'folke/todo-comments.nvim', event = 'VimEnter', dependencies = { 'nvim-lua/plenary.nvim' }, opts = { signs = false } },
 
@@ -973,12 +1092,12 @@ require('lazy').setup({
   --  Here are some example plugins that I've included in the Kickstart repository.
   --  Uncomment any of the lines below to enable them (you will need to restart nvim).
   --
-  -- require 'kickstart.plugins.debug',
-  -- require 'kickstart.plugins.indent_line',
-  -- require 'kickstart.plugins.lint',
-  -- require 'kickstart.plugins.autopairs',
-  -- require 'kickstart.plugins.neo-tree',
-  -- require 'kickstart.plugins.gitsigns', -- adds gitsigns recommend keymaps
+  require 'kickstart.plugins.debug',
+  require 'kickstart.plugins.indent_line',
+  require 'kickstart.plugins.lint',
+  require 'kickstart.plugins.autopairs',
+  require 'kickstart.plugins.neo-tree',
+  require 'kickstart.plugins.gitsigns', -- adds gitsigns recommend keymaps
 
   -- NOTE: The import below can automatically add your own plugins, configuration, etc from `lua/custom/plugins/*.lua`
   --    This is the easiest way to modularize your config.
@@ -1011,6 +1130,7 @@ require('lazy').setup({
     },
   },
 })
-
+require 'custom.zig'
+require 'custom.rust'
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
