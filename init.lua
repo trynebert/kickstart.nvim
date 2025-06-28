@@ -183,7 +183,7 @@ vim.keymap.set('n', '<leader>q', vim.diagnostic.setloclist, { desc = 'Open diagn
 -- NOTE: This won't work in all terminal emulators/tmux/etc. Try your own mapping
 -- or just use <C-\><C-n> to exit terminal mode
 vim.keymap.set('t', '<C-x>', '<C-\\><C-n>', { desc = 'Exit terminal Insert Mode' })
-vim.keymap.set('t', '<C-k>', function()
+vim.keymap.set('t', '<C-p>', function()
   vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes('<C-\\><C-n>', true, false, true), 'n', true)
   vim.cmd 'wincmd k'
 end, { desc = 'Exit Terminal Insert Mode and move up' })
@@ -199,9 +199,16 @@ end, { desc = 'Exit Terminal Insert Mode and move up' })
 --
 --  See `:help wincmd` for a list of all window commands
 vim.keymap.set('n', '<C-h>', '<C-w><C-h>', { desc = 'Move focus to the left window' })
-vim.keymap.set('n', '<C-l>', '<C-w><C-l>', { desc = 'Move focus to the right window' })
+-- vim.keymap.set('n', '<C-l>', '<C-w><C-l>', { desc = 'Move focus to the right window' })
 vim.keymap.set('n', '<C-j>', '<C-w><C-j>', { desc = 'Move focus to the lower window' })
 vim.keymap.set('n', '<C-k>', '<C-w><C-k>', { desc = 'Move focus to the upper window' })
+
+vim.keymap.set('i', '<C-h>', '<C-o>h', { desc = 'Move left in insert mode' })
+vim.keymap.set('i', '<C-j>', '<C-o>j', { desc = 'Move down in insert mode' })
+vim.keymap.set('i', '<C-k>', '<C-o>k', { desc = 'Move up in insert mode' })
+vim.keymap.set('i', '<C-l>', '<C-o>l', { desc = 'Move right in insert mode' })
+vim.keymap.set('i', '<C-a>', '<C-o>^', { desc = 'Move to first blank character of line in insert mode' })
+vim.keymap.set('i', '<C-e>', '<C-o>$', { desc = 'Move to end of line in insert mode' })
 
 -- NOTE: Some terminals have colliding keymaps or are not able to send distinct keycodes
 -- vim.keymap.set("n", "<C-S-h>", "<C-w>H", { desc = "Move window to the left" })
@@ -691,7 +698,7 @@ require('lazy').setup({
         zls = {
           cmd = { vim.fn.expand '~/zls/zig-out/bin/zls' },
         },
-        -- clangd = {},
+        clangd = {},
         -- gopls = {},
         -- pyright = {},
         -- rust_analyzer = {},
@@ -736,6 +743,8 @@ require('lazy').setup({
       local ensure_installed = vim.tbl_keys(servers or {})
       vim.list_extend(ensure_installed, {
         'stylua', -- Used to format Lua code
+        'clangd',
+        'clang-format',
       })
       require('mason-tool-installer').setup { ensure_installed = ensure_installed }
 
@@ -766,9 +775,20 @@ require('lazy').setup({
       vim.g.rustaceanvim = {
         tools = {
           enable_clippy = true,
+
+          inlay_hints = {
+            auto = true,
+            only_current_line = false,
+            show_parameter_hints = true,
+            parameter_hints_prefix = '<- ',
+            other_hints_prefix = '=> ',
+          },
         },
         server = {
-          on_attach = function(_, bufnr)
+          cmd = function()
+            return { 'rustup', 'run', 'stable', 'rust-analyzer' }
+          end,
+          on_attach = function(client, bufnr)
             local buf_map = function(mode, lhs, rhs, desc)
               vim.keymap.set(mode, lhs, rhs, { buffer = bufnr, desc = desc })
             end
@@ -777,24 +797,51 @@ require('lazy').setup({
             buf_map('n', '<leader>rc', function()
               vim.cmd 'botright split | terminal cargo clippy --all-targets --all-features -- -Wdead_code -Wclippy::all -Wclippy::pedantic'
             end, 'Rust: Run Clippy in terminal')
+            buf_map('n', '<leader>rr', function()
+              vim.cmd 'botright split | terminal cargo run'
+            end, 'Rust: Cargo Run')
+            buf_map('n', '<leader>rt', function()
+              vim.cmd 'botright split | terminal cargo test'
+            end, 'Rust: Cargo Test')
 
-            -- Example of a Rust-specific keymap (macro expansion)
+            buf_map('n', '<leader>rb', function()
+              vim.cmd 'botright split | terminal cargo build'
+            end, 'Rust: Cargo Build')
+
+            buf_map('n', '<leader>rd', function()
+              vim.cmd 'botright split | terminal cargo doc --open'
+            end, 'Rust: Open Documentation')
+
+            -- Rust-specific LSP keymaps
             buf_map('n', '<leader>rm', function()
-              vim.cmd.RustExpandMacro()
+              vim.cmd 'RustLsp expandMacro'
             end, 'Rust: Expand Macro')
+
+            buf_map('n', '<leader>rp', function()
+              vim.cmd 'RustLsp parentModule'
+            end, 'Rust: Go to Parent Module')
+
+            buf_map('n', '<leader>ri', function()
+              vim.lsp.inlay_hint.enable(vim.lsp.inlay_hint.is_enabled { bufnr = bufnr })
+            end, 'Rust: Toggle Inlay Hints')
 
             -- Configure diagnostic display
             vim.diagnostic.config {
-              virtual_text = false,
+              virtual_text = {
+                prefix = '●',
+                source = 'if_many',
+                spacing = 2,
+              },
               signs = true,
               underline = true,
               update_in_insert = false,
               severity_sort = true,
               float = {
                 border = 'rounded',
-                source = 'always',
+                source = true,
                 header = '',
                 prefix = '',
+                max_width = 80,
               },
             }
 
@@ -809,24 +856,127 @@ require('lazy').setup({
 
             -- Optional: Set highlight style for underline to make it stand out more
             vim.cmd [[
-              highlight! link DiagnosticVirtualTextHint DiagnosticUnderlineHint
-              highlight! link DiagnosticVirtualTextInfo DiagnosticUnderlineInfo
-              highlight! link DiagnosticVirtualTextWarn DiagnosticUnderlineWarn
-              highlight! link DiagnosticVirtualTextError DiagnosticUnderlineError
-
-              highlight! DiagnosticUnderlineHint gui=underline,bold guisp=LightBlue
-              highlight! DiagnosticUnderlineInfo gui=underline,bold guisp=Cyan
-              highlight! DiagnosticUnderlineWarn gui=underline,bold guibg=#3a1f1f guisp=Orange
-              highlight! DiagnosticUnderlineError gui=underline,bold guibg=#441111 guisp=Red
+            highlight! DiagnosticUnderlineHint gui=underline guisp=LightBlue
+            highlight! DiagnosticUnderlineInfo gui=underline guisp=Cyan
+            highlight! DiagnosticUnderlineWarn gui=underline guisp=Orange
+            highlight! DiagnosticUnderlineError gui=underline guisp=Red
             ]]
+
+            if client.server_capabilities.inlayHintProvider then
+              vim.lsp.inlay_hint.enable(true)
+            end
           end,
 
           settings = {
             ['rust-analyzer'] = {
+              completion = {
+                callable = {
+                  snippets = 'fill_arguments',
+                },
+                addCallArgumentSnippets = true,
+                addCallParenthesis = true,
+                postfix = {
+                  enable = true,
+                },
+              },
+              imports = {
+                granularity = {
+                  group = 'module',
+                },
+                prefix = 'self',
+              },
               diagnostics = {
                 enable = true,
                 experimental = {
                   enable = true,
+                },
+                styleLints = {
+                  enable = true,
+                },
+              },
+              lens = {
+                enable = true,
+                implementation = {
+                  enable = true,
+                },
+                references = {
+                  adt = {
+                    enable = true,
+                  },
+                  enumVariant = {
+                    enable = true,
+                  },
+                  method = {
+                    enable = true,
+                  },
+                  trait = {
+                    enable = true,
+                  },
+                },
+                run = {
+                  enable = true,
+                },
+              },
+              inlayHints = {
+                bindingModeHints = {
+                  enable = true,
+                },
+                chainingHints = {
+                  enable = true,
+                },
+                closingBraceHints = {
+                  enable = true,
+                  minLines = 25,
+                },
+                lifetimeElisionHints = {
+                  enable = 'skip_trivial',
+                  useParameterNames = true,
+                },
+                maxLength = 25,
+                parameterHints = {
+                  enable = 'never',
+                },
+                renderColons = true,
+                typeHints = {
+                  enable = false,
+                  hideClosureInitialization = false,
+                  hideNamedConstructor = false,
+                },
+              },
+              cargo = {
+                allFeatures = true,
+                loadOutDirsFromCheck = true,
+                runBuildScripts = true,
+                buildScripts = {
+                  enable = true,
+                },
+              },
+              checkOnSave = {
+                enable = true,
+                command = 'clippy',
+                allTargets = true,
+                extraArgs = { '--no-deps' },
+              },
+              procMacro = {
+                enable = true,
+                ignored = {
+                  ['async-trait'] = { 'async-trait' },
+                  ['napi-derive'] = { 'napi' },
+                  ['async-recursion'] = { 'async_recursion' },
+                },
+              },
+              hover = {
+                actions = {
+                  enable = true,
+                  implementations = {
+                    enable = true,
+                  },
+                  references = {
+                    enable = true,
+                  },
+                  run = {
+                    enable = true,
+                  },
                 },
               },
             },
@@ -1082,6 +1232,30 @@ require('lazy').setup({
     --    - Show your current context: https://github.com/nvim-treesitter/nvim-treesitter-context
     --    - Treesitter + textobjects: https://github.com/nvim-treesitter/nvim-treesitter-textobjects
   },
+  -- {
+  --   'supermaven-inc/supermaven-nvim',
+  --   event = 'InsertEnter',
+  --   config = function()
+  --     require('supermaven-nvim').setup {
+  --       keymaps = {
+  --         accept_suggestion = '<C-p>', -- Tab to accept (most natural)
+  --         clear_suggestion = '<C-c>', -- Ctrl+C to dismiss
+  --         accept_word = '<C-f>', -- Ctrl+F for next word (f for forward)
+  --       },
+  --       ignore_filetypes = {
+  --         cpp = true,
+  --         c = true,
+  --       },
+  --       color = {
+  --         suggestion_color = '#808080',
+  --         cterm = 244,
+  --       },
+  --       log_level = 'info',
+  --       disable_inline_completion = false,
+  --       disable_keymaps = false,
+  --     }
+  --   end,
+  -- },
 
   -- The following comments only work if you have downloaded the kickstart repo, not just copy pasted the
   -- init.lua. If you want these files, they are in the repository, so you can just download them and
@@ -1131,6 +1305,6 @@ require('lazy').setup({
   },
 })
 require 'custom.zig'
-require 'custom.rust'
+-- require 'custom.rust'
 -- The line beneath this is called `modeline`. See `:help modeline`
 -- vim: ts=2 sts=2 sw=2 et
